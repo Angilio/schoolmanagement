@@ -17,11 +17,12 @@ export default function UpdatePasswordForm({ className = '' }) {
         data,
         setData,
         errors,
-        put,
+        post,
         reset,
         processing,
         recentlySuccessful,
     } = useForm({
+        _method: 'put',
         current_password: '',
         password: '',
         password_confirmation: '',
@@ -30,9 +31,24 @@ export default function UpdatePasswordForm({ className = '' }) {
     const updatePassword = (e) => {
         e.preventDefault();
 
-        put(route('password.update'), {
+        /*
+        |--------------------------------------------------------------------------
+        | Important pour la production
+        |--------------------------------------------------------------------------
+        | On évite la vraie requête PUT.
+        | Laravel reçoit POST + _method=put et le traite comme PUT.
+        |--------------------------------------------------------------------------
+        */
+        post(route('password.update'), {
             preserveScroll: true,
-            onSuccess: () => reset(),
+            forceFormData: true,
+            onSuccess: () => {
+                reset(
+                    'current_password',
+                    'password',
+                    'password_confirmation'
+                );
+            },
             onError: (errors) => {
                 if (errors.password) {
                     reset('password', 'password_confirmation');
@@ -189,7 +205,11 @@ function PasswordField({
                             ? 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'
                             : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100'
                     }`}
-                    title={show ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    title={
+                        show
+                            ? 'Masquer le mot de passe'
+                            : 'Afficher le mot de passe'
+                    }
                 >
                     {show ? (
                         <EyeOff className="h-5 w-5" />

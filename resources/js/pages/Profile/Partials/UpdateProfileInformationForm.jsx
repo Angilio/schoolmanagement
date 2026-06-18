@@ -21,11 +21,12 @@ export default function UpdateProfileInformation({
     const {
         data,
         setData,
-        patch,
+        post,
         errors,
         processing,
         recentlySuccessful,
     } = useForm({
+        _method: 'patch',
         name: user.name,
         email: user.email,
     });
@@ -33,8 +34,19 @@ export default function UpdateProfileInformation({
     const submit = (e) => {
         e.preventDefault();
 
-        patch(route('profile.update'), {
+        /*
+        |--------------------------------------------------------------------------
+        | Important pour la production
+        |--------------------------------------------------------------------------
+        | On évite la vraie requête PATCH qui peut provoquer :
+        | net::ERR_HTTP2_PROTOCOL_ERROR
+        |
+        | Laravel reçoit POST + _method=patch et le traite comme PATCH.
+        |--------------------------------------------------------------------------
+        */
+        post(route('profile.update'), {
             preserveScroll: true,
+            forceFormData: true,
         });
     };
 
