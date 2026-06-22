@@ -238,6 +238,22 @@ class BulletinController extends Controller
         );
     }
 
+    // public function show(Bulletin $bulletin): Response
+    // {
+    //     $bulletin->load([
+    //         'student.user',
+    //         'student.classe',
+    //         'student.section',
+    //         'student.serie',
+    //         'trimestre.schoolYear',
+    //         'details.subject',
+    //     ]);
+
+    //     return Inertia::render('Admin/Bulletins/Show', [
+    //         'bulletin' => $bulletin,
+    //     ]);
+    // }
+
     public function show(Bulletin $bulletin): Response
     {
         $bulletin->load([
@@ -249,8 +265,109 @@ class BulletinController extends Controller
             'details.subject',
         ]);
 
+        $student = $bulletin->student;
+        $schoolYearId = $bulletin->school_year_id;
+
+        $schoolYear = SchoolYear::find($schoolYearId);
+
+        /*
+        |--------------------------------------------------------------------------
+        | On récupère toujours les 3 trimestres de l'année scolaire
+        |--------------------------------------------------------------------------
+        */
+        $annualTrimestres = Trimestre::where('school_year_id', $schoolYearId)
+            ->orderBy('start_date')
+            ->orderBy('id')
+            ->take(3)
+            ->get()
+            ->values();
+
+        /*
+        |--------------------------------------------------------------------------
+        | On récupère tous les bulletins déjà générés pour cet élève dans l'année
+        |--------------------------------------------------------------------------
+        */
+        $annualBulletins = Bulletin::with([
+            'trimestre.schoolYear',
+            'details.subject',
+        ])
+            ->where('student_id', $student->id)
+            ->where('school_year_id', $schoolYearId)
+            ->whereIn('trimestre_id', $annualTrimestres->pluck('id'))
+            ->orderBy('trimestre_id')
+            ->get()
+            ->values();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Moyenne annuelle de l'élève
+        |--------------------------------------------------------------------------
+        */
+        $validAverages = $annualBulletins
+            ->pluck('moyenne')
+            ->filter(fn ($value) => $value !== null)
+            ->map(fn ($value) => (float) $value)
+            ->values();
+
+        $annualAverage = $validAverages->count() > 0
+            ? round($validAverages->avg(), 2)
+            : null;
+
+        /*
+        |--------------------------------------------------------------------------
+        | Rang annuel dans la même classe / section / série
+        |--------------------------------------------------------------------------
+        */
+        $classStudentIds = Student::where('classe_id', $student->classe_id)
+            ->where('section_id', $student->section_id)
+            ->when(
+                $student->serie_id,
+                fn ($query) => $query->where('serie_id', $student->serie_id),
+                fn ($query) => $query->whereNull('serie_id')
+            )
+            ->pluck('id');
+
+        $annualAverages = Bulletin::whereIn('student_id', $classStudentIds)
+            ->where('school_year_id', $schoolYearId)
+            ->whereIn('trimestre_id', $annualTrimestres->pluck('id'))
+            ->whereNotNull('moyenne')
+            ->select('student_id', DB::raw('AVG(moyenne) as annual_average'))
+            ->groupBy('student_id')
+            ->orderByDesc('annual_average')
+            ->get();
+
+        $annualRank = null;
+        $rank = 1;
+        $previousAverage = null;
+        $previousRank = 1;
+
+        foreach ($annualAverages as $index => $item) {
+            if (
+                $previousAverage !== null &&
+                (float) $item->annual_average === (float) $previousAverage
+            ) {
+                $currentRank = $previousRank;
+            } else {
+                $currentRank = $rank;
+                $previousRank = $currentRank;
+            }
+
+            if ((int) $item->student_id === (int) $student->id) {
+                $annualRank = $currentRank;
+                break;
+            }
+
+            $previousAverage = $item->annual_average;
+            $rank = $index + 2;
+        }
+
         return Inertia::render('Admin/Bulletins/Show', [
             'bulletin' => $bulletin,
+            'schoolYear' => $schoolYear,
+            'annualTrimestres' => $annualTrimestres,
+            'annualBulletins' => $annualBulletins,
+            'annualAverage' => $annualAverage,
+            'annualRank' => $annualRank,
         ]);
     }
 

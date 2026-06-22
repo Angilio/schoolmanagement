@@ -1,11 +1,10 @@
 import AppLayout from "@/Layouts/AppLayout";
 import { Head, router, useForm } from "@inertiajs/react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import {
     BookOpen,
     CalendarDays,
     CheckCircle2,
-    Clock,
     GraduationCap,
     Save,
     Search,
@@ -30,8 +29,19 @@ export default function Index({
         notes: [],
     });
 
+    const sortedStudents = useMemo(() => {
+        return [...students].sort((a, b) => {
+            const nameA = a.user?.name || "";
+            const nameB = b.user?.name || "";
+
+            return nameA.localeCompare(nameB, "fr", {
+                sensitivity: "base",
+            });
+        });
+    }, [students]);
+
     useEffect(() => {
-        const notes = students.map((student) => {
+        const notes = sortedStudents.map((student) => {
             const existing = existingNotes?.[student.id];
 
             return {
@@ -45,7 +55,12 @@ export default function Index({
             teacher_subject_id: selectedTeacherSubjectId,
             notes,
         });
-    }, [students, selectedEvaluationId, selectedTeacherSubjectId]);
+    }, [
+        sortedStudents,
+        selectedEvaluationId,
+        selectedTeacherSubjectId,
+        existingNotes,
+    ]);
 
     const goSearch = (e) => {
         e.preventDefault();
@@ -106,7 +121,10 @@ export default function Index({
             value = `${integerPart}.${decimalPart}`;
         } else if (value.includes(".")) {
             decimalPart = decimalPart.slice(0, 2);
-            value = decimalPart !== "" ? `${integerPart}.${decimalPart}` : `${integerPart}.`;
+            value =
+                decimalPart !== ""
+                    ? `${integerPart}.${decimalPart}`
+                    : `${integerPart}.`;
         }
 
         if (value === ".") {
@@ -193,7 +211,8 @@ export default function Index({
 
     const getEvaluationLabel = (evaluation) => {
         const trimestre = evaluation.trimestre;
-        const year = trimestre?.school_year?.year || trimestre?.schoolYear?.year;
+        const year =
+            trimestre?.school_year?.year || trimestre?.schoolYear?.year;
 
         return `${evaluation.title} - ${trimestre?.name || "Trimestre"}${
             year ? ` (${year})` : ""
@@ -359,7 +378,9 @@ export default function Index({
                         <InfoCard
                             icon={<GraduationCap size={24} />}
                             label="Classe / Section"
-                            value={`${selectedAssignment.classe?.name || ""} - Section ${
+                            value={`${
+                                selectedAssignment.classe?.name || ""
+                            } - Section ${
                                 selectedAssignment.section?.name || ""
                             }`}
                             subValue={
@@ -412,8 +433,9 @@ export default function Index({
                                 </h2>
 
                                 <p className="text-sm text-slate-500">
-                                    Note comprise entre 0 et 20, avec au maximum
-                                    deux chiffres après la virgule.
+                                    Liste rangée par ordre alphabétique. Note
+                                    comprise entre 0 et 20, avec au maximum deux
+                                    chiffres après la virgule.
                                 </p>
                             </div>
 
@@ -462,7 +484,7 @@ export default function Index({
                                 </thead>
 
                                 <tbody className="divide-y divide-slate-100">
-                                    {students.map((student, index) => {
+                                    {sortedStudents.map((student, index) => {
                                         const noteItem = data.notes.find(
                                             (item) =>
                                                 Number(item.student_id) ===
@@ -491,7 +513,9 @@ export default function Index({
                                                 <td className="px-6 py-5">
                                                     <div className="flex items-center gap-3">
                                                         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
-                                                            <UserRound size={20} />
+                                                            <UserRound
+                                                                size={20}
+                                                            />
                                                         </div>
 
                                                         <div>
