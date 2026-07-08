@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\StudentParent;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Student extends Model
 {
@@ -52,5 +54,17 @@ class Student extends Model
             ($this->serie?->name ?? '') . ' ' .
             ($this->section?->name ?? '')
         );
+    }
+
+    public function parents(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            StudentParent::class,
+            'parent_student',
+            'student_id',
+            'parent_id'
+        )
+            ->withPivot(['relationship', 'is_primary'])
+            ->withTimestamps();
     }
 }

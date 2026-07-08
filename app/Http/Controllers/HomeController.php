@@ -17,11 +17,17 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\Response;
+use Spatie\Permission\Models\Role;
 
 class HomeController extends Controller
 {
     public function index(): Response
     {
+        // Role::firstOrCreate([
+        //     'name' => 'Parent',
+        //     'guard_name' => 'web',
+        // ]);
+
         $user = Auth::user();
 
         return Inertia::render('Welcome', [

@@ -14,6 +14,7 @@ use App\Http\Controllers\Teacher\NoteEntryController;
 use App\Http\Controllers\Admin\BulletinController as AdminBulletinController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Student\BulletinController as StudentBulletinController;
+use App\Http\Controllers\Parent\ParentDashboardController;
 
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -261,6 +262,17 @@ Route::middleware(['auth', 'role:Admin'])
             ->name('bulletins.index');
 
         Route::get('/bulletins/{bulletin}', [StudentBulletinController::class, 'show'])
+            ->name('bulletins.show');
+    });
+
+    Route::middleware(['auth', 'verified', 'role:Parent'])
+    ->prefix('parent')
+    ->name('parent.')
+    ->group(function () {
+        Route::get('/dashboard', [ParentDashboardController::class, 'index'])
+            ->name('dashboard');
+
+        Route::get('/bulletins/{bulletin}', [ParentDashboardController::class, 'showBulletin'])
             ->name('bulletins.show');
     });
 
