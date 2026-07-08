@@ -1,5 +1,5 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import BulletinView from "@/Pages/Admin/Bulletins/BulletinView";
+import BulletinView from "@/Components/BulletinView";
 
 export default function BulletinShow({ bulletin }) {
     return (
