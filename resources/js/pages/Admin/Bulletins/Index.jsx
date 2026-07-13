@@ -1,14 +1,16 @@
 import AppLayout from "@/Layouts/AppLayout";
 import { Head, Link, useForm } from "@inertiajs/react";
+import { router } from "@inertiajs/react";
 import {
-    Archive,
     Award,
-    Download,
     Eye,
     FileText,
     GraduationCap,
     Search,
     Users,
+    Filter,
+    Layers,
+    Calendar,
 } from "lucide-react";
 
 export default function Index({
@@ -16,9 +18,8 @@ export default function Index({
     sections = [],
     series = [],
     trimestres = [],
-    schoolYears = [],
     bulletins = {},
-    archives = [],
+    filters = {}, // Récupère { classe_id, section_id, trimestre_id } depuis le backend
 }) {
     const bulletinItems = Array.isArray(bulletins)
         ? bulletins
@@ -39,45 +40,40 @@ export default function Index({
         trimestre_id: "",
     });
 
-    const {
-        data: archiveData,
-        setData: setArchiveData,
-    } = useForm({
-        school_year_id: "",
-        classe_id: "",
-        section_id: "",
-        serie_id: "",
-    });
-
     const submit = (e) => {
         e.preventDefault();
-
         post(route("admin.bulletins.generate"), {
             preserveScroll: true,
         });
     };
 
-    const exportArchivePdf = (e) => {
-        e.preventDefault();
+    // Fonction centralisée pour appliquer les filtres en SPA
+    const applyFilter = (newFilters) => {
+        const updatedFilters = { ...filters, ...newFilters, page: 1 };
+        
+        // Nettoyage des clés vides
+        Object.keys(updatedFilters).forEach(key => {
+            if (updatedFilters[key] === "" || updatedFilters[key] === null || updatedFilters[key] === undefined) {
+                delete updatedFilters[key];
+            }
+        });
 
-        if (!archiveData.school_year_id || !archiveData.classe_id) {
-            alert("Veuillez choisir une année scolaire et une classe.");
-            return;
-        }
-
-        window.open(route("admin.bulletins.archive-pdf", archiveData), "_blank");
+        router.get(
+            route("admin.bulletins.index"),
+            updatedFilters,
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+            }
+        );
     };
 
     const getTrimestreLabel = (trimestre) => {
         const year = trimestre?.school_year?.year || trimestre?.schoolYear?.year;
-
         return `${trimestre?.name || trimestre?.title || "Trimestre"}${
             year ? ` - ${year}` : ""
         }`;
-    };
-
-    const getSchoolYearLabel = (schoolYear) => {
-        return schoolYear?.year || schoolYear?.name || `Année ${schoolYear?.id}`;
     };
 
     return (
@@ -88,7 +84,7 @@ export default function Index({
                         Bulletins
                     </h2>
                     <p className="text-sm text-slate-500">
-                        Génération automatique des bulletins et archivage PDF annuel.
+                        Génération automatique et consultation des bulletins trimestriels.
                     </p>
                 </div>
             }
@@ -96,191 +92,86 @@ export default function Index({
             <Head title="Bulletins" />
 
             <div className="space-y-8">
-                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-700 to-violet-700 p-6 text-white shadow-xl">
-                    <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/20" />
-                    <div className="absolute -bottom-12 left-20 h-36 w-36 rounded-full bg-white/10" />
-
-                    <div className="relative">
-                        <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-bold">
-                            <Award size={18} />
-                            Module bulletins
-                        </div>
-
-                        <h1 className="text-3xl font-black">
-                            Bulletins trimestriels et archive annuelle
-                        </h1>
-
-                        <p className="mt-2 max-w-3xl text-blue-100">
-                            Pour chaque matière, le système calcule d’abord la moyenne
-                            des évaluations du trimestre, applique le coefficient,
-                            puis classe les élèves par rang.
+                {/* Formulaire de génération (Inchangé) */}
+                <div className="max-w-4xl rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
+                    <div className="mb-5">
+                        <h2 className="text-xl font-black text-slate-800">
+                            Générer les bulletins trimestriels
+                        </h2>
+                        <p className="text-sm text-slate-500">
+                            Choisissez une classe et un trimestre. Section et série sont optionnelles.
                         </p>
                     </div>
+
+                    <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
+                        <SelectField
+                            label="Classe"
+                            value={data.classe_id}
+                            onChange={(value) => setData("classe_id", value)}
+                            error={errors.classe_id}
+                        >
+                            <option value="">Choisir classe</option>
+                            {classes.map((classe) => (
+                                <option key={classe.id} value={classe.id}>
+                                    {classe.name}
+                                </option>
+                            ))}
+                        </SelectField>
+
+                        <SelectField
+                            label="Trimestre"
+                            value={data.trimestre_id}
+                            onChange={(value) => setData("trimestre_id", value)}
+                            error={errors.trimestre_id}
+                        >
+                            <option value="">Choisir trimestre</option>
+                            {trimestres.map((trimestre) => (
+                                <option key={trimestre.id} value={trimestre.id}>
+                                    {getTrimestreLabel(trimestre)}
+                                </option>
+                            ))}
+                        </SelectField>
+
+                        <SelectField
+                            label="Section"
+                            value={data.section_id}
+                            onChange={(value) => setData("section_id", value)}
+                        >
+                            <option value="">Toutes sections</option>
+                            {sections.map((section) => (
+                                <option key={section.id} value={section.id}>
+                                    {section.name}
+                                </option>
+                            ))}
+                        </SelectField>
+
+                        <SelectField
+                            label="Série"
+                            value={data.serie_id}
+                            onChange={(value) => setData("serie_id", value)}
+                        >
+                            <option value="">Toutes séries</option>
+                            {series.map((serie) => (
+                                <option key={serie.id} value={serie.id}>
+                                    {serie.name}
+                                </option>
+                            ))}
+                        </SelectField>
+
+                        <div className="md:col-span-2">
+                            <button
+                                type="submit"
+                                disabled={processing}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:opacity-60"
+                            >
+                                <Search size={18} />
+                                {processing ? "Génération..." : "Générer les bulletins"}
+                            </button>
+                        </div>
+                    </form>
                 </div>
 
-                <div className="grid gap-6 xl:grid-cols-2">
-                    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
-                        <div className="mb-5">
-                            <h2 className="text-xl font-black text-slate-800">
-                                Générer les bulletins trimestriels
-                            </h2>
-                            <p className="text-sm text-slate-500">
-                                Choisissez une classe et un trimestre. Section et série sont optionnelles.
-                            </p>
-                        </div>
-
-                        <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-                            <SelectField
-                                label="Classe"
-                                value={data.classe_id}
-                                onChange={(value) => setData("classe_id", value)}
-                                error={errors.classe_id}
-                            >
-                                <option value="">Choisir classe</option>
-                                {classes.map((classe) => (
-                                    <option key={classe.id} value={classe.id}>
-                                        {classe.name}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <SelectField
-                                label="Trimestre"
-                                value={data.trimestre_id}
-                                onChange={(value) => setData("trimestre_id", value)}
-                                error={errors.trimestre_id}
-                            >
-                                <option value="">Choisir trimestre</option>
-                                {trimestres.map((trimestre) => (
-                                    <option key={trimestre.id} value={trimestre.id}>
-                                        {getTrimestreLabel(trimestre)}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <SelectField
-                                label="Section"
-                                value={data.section_id}
-                                onChange={(value) => setData("section_id", value)}
-                            >
-                                <option value="">Toutes sections</option>
-                                {sections.map((section) => (
-                                    <option key={section.id} value={section.id}>
-                                        {section.name}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <SelectField
-                                label="Série"
-                                value={data.serie_id}
-                                onChange={(value) => setData("serie_id", value)}
-                            >
-                                <option value="">Toutes séries</option>
-                                {series.map((serie) => (
-                                    <option key={serie.id} value={serie.id}>
-                                        {serie.name}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <div className="md:col-span-2">
-                                <button
-                                    type="submit"
-                                    disabled={processing}
-                                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:opacity-60"
-                                >
-                                    <Search size={18} />
-                                    {processing ? "Génération..." : "Générer les bulletins"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
-                        <div className="mb-5">
-                            <h2 className="text-xl font-black text-slate-800">
-                                Créer une archive PDF annuelle
-                            </h2>
-                            <p className="text-sm text-slate-500">
-                                À la fin de l’année scolaire, générez un PDF avec les 3 trimestres.
-                            </p>
-                        </div>
-
-                        <form onSubmit={exportArchivePdf} className="grid gap-4 md:grid-cols-2">
-                            <SelectField
-                                label="Année scolaire"
-                                value={archiveData.school_year_id}
-                                onChange={(value) =>
-                                    setArchiveData("school_year_id", value)
-                                }
-                            >
-                                <option value="">Choisir année scolaire</option>
-                                {schoolYears.map((year) => (
-                                    <option key={year.id} value={year.id}>
-                                        {getSchoolYearLabel(year)}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <SelectField
-                                label="Classe"
-                                value={archiveData.classe_id}
-                                onChange={(value) =>
-                                    setArchiveData("classe_id", value)
-                                }
-                            >
-                                <option value="">Choisir classe</option>
-                                {classes.map((classe) => (
-                                    <option key={classe.id} value={classe.id}>
-                                        {classe.name}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <SelectField
-                                label="Section"
-                                value={archiveData.section_id}
-                                onChange={(value) =>
-                                    setArchiveData("section_id", value)
-                                }
-                            >
-                                <option value="">Toutes sections</option>
-                                {sections.map((section) => (
-                                    <option key={section.id} value={section.id}>
-                                        {section.name}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <SelectField
-                                label="Série"
-                                value={archiveData.serie_id}
-                                onChange={(value) =>
-                                    setArchiveData("serie_id", value)
-                                }
-                            >
-                                <option value="">Toutes séries</option>
-                                {series.map((serie) => (
-                                    <option key={serie.id} value={serie.id}>
-                                        {serie.name}
-                                    </option>
-                                ))}
-                            </SelectField>
-
-                            <div className="md:col-span-2">
-                                <button
-                                    type="submit"
-                                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-700"
-                                >
-                                    <Archive size={18} />
-                                    Générer archive PDF
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
+                {/* Stats */}
                 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                     <StatCard
                         icon={<FileText size={28} />}
@@ -288,14 +179,12 @@ export default function Index({
                         value={bulletinItems.length}
                         color="blue"
                     />
-
                     <StatCard
                         icon={<GraduationCap size={28} />}
                         label="Classes"
                         value={classes.length}
                         color="violet"
                     />
-
                     <StatCard
                         icon={<Award size={28} />}
                         label="Trimestres"
@@ -304,16 +193,121 @@ export default function Index({
                     />
                 </div>
 
+                {/* Section Tableau et Multi-Filtres Cascades */}
                 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
-                    <div className="border-b border-slate-200 p-6">
-                        <h2 className="text-xl font-black text-slate-800">
-                            Bulletins générés
-                        </h2>
-                        <p className="text-sm text-slate-500">
-                            Les élèves sont triés par rang dans chaque trimestre.
-                        </p>
+                    <div className="border-b border-slate-200 p-6 space-y-4">
+                        <div>
+                            <h2 className="text-xl font-black text-slate-800">
+                                Bulletins générés
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                Filtrez en cascade pour affiner votre recherche. Les élèves sont classés par rang.
+                            </p>
+                        </div>
+
+                        {/* NIVEAU 1 : Filtre des Classes */}
+                        <div className="flex flex-col gap-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                <GraduationCap size={14} /> Classe :
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-slate-50 p-1.5 border border-slate-100">
+                                <button
+                                    onClick={() => applyFilter({ classe_id: "", section_id: "", trimestre_id: "" })}
+                                    className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition ${
+                                        !filters.classe_id
+                                            ? "bg-blue-600 text-white shadow-md shadow-blue-600/15"
+                                            : "text-slate-600 hover:bg-slate-200/60"
+                                    }`}
+                                >
+                                    <Filter size={14} />
+                                    Toutes les classes
+                                </button>
+                                {classes.map((classe) => (
+                                    <button
+                                        key={classe.id}
+                                        onClick={() => applyFilter({ classe_id: classe.id, section_id: "", trimestre_id: "" })}
+                                        className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                                            String(filters.classe_id) === String(classe.id)
+                                                ? "bg-blue-600 text-white shadow-md shadow-blue-600/15"
+                                                : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                        }`}
+                                    >
+                                        {classe.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* NIVEAU 2 : Filtre des Sections (S'affiche uniquement si une classe est cochée) */}
+                        {filters.classe_id && (
+                            <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                    <Layers size={14} /> Section :
+                                </span>
+                                <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-slate-50 p-1.5 border border-slate-100">
+                                    <button
+                                        onClick={() => applyFilter({ section_id: "" })}
+                                        className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition ${
+                                            !filters.section_id
+                                                ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/15"
+                                                : "text-slate-600 hover:bg-slate-200/60"
+                                        }`}
+                                    >
+                                        Toutes les sections
+                                    </button>
+                                    {sections.map((section) => (
+                                        <button
+                                            key={section.id}
+                                            onClick={() => applyFilter({ section_id: section.id })}
+                                            className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                                                String(filters.section_id) === String(section.id)
+                                                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/15"
+                                                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                            }`}
+                                        >
+                                            {section.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* NIVEAU 3 : Filtre des Trimestres (S'affiche dès qu'une classe est sélectionnée) */}
+                        {filters.classe_id && (
+                            <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                    <Calendar size={14} /> Trimestre :
+                                </span>
+                                <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-slate-50 p-1.5 border border-slate-100">
+                                    <button
+                                        onClick={() => applyFilter({ trimestre_id: "" })}
+                                        className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition ${
+                                            !filters.trimestre_id
+                                                ? "bg-violet-600 text-white shadow-md shadow-violet-600/15"
+                                                : "text-slate-600 hover:bg-slate-200/60"
+                                        }`}
+                                    >
+                                        Tous les trimestres
+                                    </button>
+                                    {trimestres.map((trimestre) => (
+                                        <button
+                                            key={trimestre.id}
+                                            onClick={() => applyFilter({ trimestre_id: trimestre.id })}
+                                            className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                                                String(filters.trimestre_id) === String(trimestre.id)
+                                                    ? "bg-violet-600 text-white shadow-md shadow-violet-600/15"
+                                                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                            }`}
+                                        >
+                                            {getTrimestreLabel(trimestre)}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
+                    {/* Tableau des bulletins */}
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
                             <thead className="bg-slate-100 text-sm text-slate-600">
@@ -385,7 +379,7 @@ export default function Index({
                                 {bulletinItems.length === 0 && (
                                     <tr>
                                         <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
-                                            Aucun bulletin généré.
+                                            Aucun bulletin trouvé pour cette sélection de filtres.
                                         </td>
                                     </tr>
                                 )}
@@ -393,72 +387,8 @@ export default function Index({
                         </table>
                     </div>
 
+                    {/* Pagination SPA avec prise en compte des états */}
                     {links.length > 3 && <Pagination links={links} />}
-                </div>
-
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
-                    <div className="border-b border-slate-200 p-6">
-                        <h2 className="text-xl font-black text-slate-800">
-                            Archives PDF récentes
-                        </h2>
-                        <p className="text-sm text-slate-500">
-                            Les derniers fichiers PDF générés pour l’école.
-                        </p>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                            <thead className="bg-slate-100 text-sm text-slate-600">
-                                <tr>
-                                    <th className="px-6 py-4 font-bold">Année</th>
-                                    <th className="px-6 py-4 font-bold">Classe</th>
-                                    <th className="px-6 py-4 font-bold">Date</th>
-                                    <th className="px-6 py-4 text-right font-bold">PDF</th>
-                                </tr>
-                            </thead>
-
-                            <tbody className="divide-y divide-slate-100">
-                                {archives.map((archive) => (
-                                    <tr key={archive.id}>
-                                        <td className="px-6 py-5 font-bold text-slate-700">
-                                            {getSchoolYearLabel(archive.school_year)}
-                                        </td>
-
-                                        <td className="px-6 py-5 font-bold text-slate-700">
-                                            {archive.classe?.name || "-"}{" "}
-                                            {archive.serie?.name || ""}{" "}
-                                            {archive.section?.name || ""}
-                                        </td>
-
-                                        <td className="px-6 py-5 text-slate-500">
-                                            {archive.generated_at || archive.created_at}
-                                        </td>
-
-                                        <td className="px-6 py-5 text-right">
-                                            <Link
-                                                href={route(
-                                                    "admin.bulletins.archives.download",
-                                                    archive.id
-                                                )}
-                                                className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-600 hover:text-white"
-                                            >
-                                                <Download size={17} />
-                                                Télécharger
-                                            </Link>
-                                        </td>
-                                    </tr>
-                                ))}
-
-                                {archives.length === 0 && (
-                                    <tr>
-                                        <td colSpan="4" className="px-6 py-10 text-center text-slate-500">
-                                            Aucune archive PDF générée.
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
             </div>
         </AppLayout>
@@ -471,7 +401,6 @@ function SelectField({ label, value, onChange, error, children }) {
             <label className="mb-2 block text-sm font-bold text-slate-700">
                 {label}
             </label>
-
             <select
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
@@ -479,7 +408,6 @@ function SelectField({ label, value, onChange, error, children }) {
             >
                 {children}
             </select>
-
             {error && (
                 <p className="mt-2 text-sm font-bold text-red-600">
                     {error}
@@ -528,9 +456,10 @@ function Pagination({ links }) {
                         key={index}
                         href={link.url}
                         preserveScroll
-                        className={`rounded-xl px-4 py-2 text-sm font-bold ${
+                        preserveState
+                        className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
                             link.active
-                                ? "bg-blue-600 text-white"
+                                ? "bg-blue-600 text-white shadow-sm"
                                 : "border border-slate-200 bg-white text-slate-600 hover:bg-blue-50"
                         }`}
                         dangerouslySetInnerHTML={{ __html: link.label }}

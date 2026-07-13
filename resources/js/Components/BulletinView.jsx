@@ -302,18 +302,12 @@ export default function BulletinView({
                                 </div>
 
                                 <div className="border-l-2 border-slate-900 p-3">
-                                    <div className="rounded-xl border border-slate-300 p-2 text-center">
-                                        <p className="text-[10px] font-bold uppercase text-slate-500">
-                                            Moyenne trimestrielle
-                                        </p>
-
-                                        <p className="mt-1 text-3xl font-black text-blue-700 print-text-black">
-                                            {formatNumber(bulletin.moyenne)}
-                                        </p>
-
-                                        <p className="text-xs font-bold text-slate-500">
-                                            /20
-                                        </p>
+                                    <div className="flex h-full items-center justify-center p-2 text-center">
+                                        <img
+                                            src="/logoAPE.jfif"
+                                            alt="Logo Lycée Privé A.P.E"
+                                            className="h-20 w-20 object-contain rounded-xl"
+                                        />
                                     </div>
                                 </div>
                             </div>

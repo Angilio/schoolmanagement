@@ -32,16 +32,16 @@ export default function Index({
     const [studentToDelete, setStudentToDelete] = useState(null);
 
     const [selectedClasse, setSelectedClasse] = useState("all");
-    const [selectedSection, setSelectedSection] = useState("all");
     const [selectedSerie, setSelectedSerie] = useState("all");
+    const [selectedSection, setSelectedSection] = useState("all");
     const [currentPage, setCurrentPage] = useState(1);
 
     const [form, setForm] = useState({
         name: "",
         email: "",
         classe_id: "",
-        section_id: "",
         serie_id: "",
+        section_id: "",
         birthdate: "",
     });
 
@@ -51,8 +51,8 @@ export default function Index({
             name: "",
             email: "",
             classe_id: "",
-            section_id: "",
             serie_id: "",
+            section_id: "",
             birthdate: "",
         });
         setShowModal(true);
@@ -64,8 +64,8 @@ export default function Index({
             name: s.user?.name ?? "",
             email: s.user?.email ?? "",
             classe_id: s.classe_id ?? "",
-            section_id: s.section_id ?? "",
             serie_id: s.serie_id ?? "",
+            section_id: s.section_id ?? "",
             birthdate: s.birthdate ?? "",
         });
         setShowModal(true);
@@ -76,22 +76,40 @@ export default function Index({
         return classe?.name?.toLowerCase().includes("seconde");
     }, [classes, form.classe_id]);
 
+    const hasActiveFilter = useMemo(() => {
+        return (
+            selectedClasse !== "all" ||
+            selectedSerie !== "all" ||
+            selectedSection !== "all"
+        );
+    }, [selectedClasse, selectedSerie, selectedSection]);
+
     const filteredStudents = useMemo(() => {
+        if (!hasActiveFilter) {
+            return [];
+        }
+
         return students.filter((s) => {
             const matchClasse =
                 selectedClasse === "all" || s.classe_id == selectedClasse;
-
-            const matchSection =
-                selectedSection === "all" || s.section_id == selectedSection;
 
             const matchSerie =
                 selectedSerie === "all" ||
                 (selectedSerie === "none" && !s.serie_id) ||
                 s.serie_id == selectedSerie;
 
-            return matchClasse && matchSection && matchSerie;
+            const matchSection =
+                selectedSection === "all" || s.section_id == selectedSection;
+
+            return matchClasse && matchSerie && matchSection;
         });
-    }, [students, selectedClasse, selectedSection, selectedSerie]);
+    }, [
+        students,
+        selectedClasse,
+        selectedSerie,
+        selectedSection,
+        hasActiveFilter,
+    ]);
 
     const totalPages = Math.max(
         1,
@@ -122,13 +140,13 @@ export default function Index({
         setCurrentPage(1);
     };
 
-    const changeSectionFilter = (value) => {
-        setSelectedSection(value);
+    const changeSerieFilter = (value) => {
+        setSelectedSerie(value);
         setCurrentPage(1);
     };
 
-    const changeSerieFilter = (value) => {
-        setSelectedSerie(value);
+    const changeSectionFilter = (value) => {
+        setSelectedSection(value);
         setCurrentPage(1);
     };
 
@@ -164,8 +182,8 @@ export default function Index({
 
     const resetFilters = () => {
         setSelectedClasse("all");
-        setSelectedSection("all");
         setSelectedSerie("all");
+        setSelectedSection("all");
         setCurrentPage(1);
     };
 
@@ -180,7 +198,7 @@ export default function Index({
                         Élèves
                     </h2>
                     <p className="text-sm text-slate-500">
-                        Gestion des élèves, classes, sections et séries.
+                        Gestion des élèves, classes, séries et sections.
                     </p>
                 </div>
             }
@@ -199,7 +217,7 @@ export default function Index({
                             </h1>
                             <p className="mt-2 max-w-2xl text-blue-100">
                                 Ajoutez, modifiez et filtrez les élèves par
-                                classe, section ou série.
+                                classe, série ou section.
                             </p>
                         </div>
 
@@ -238,8 +256,8 @@ export default function Index({
 
                     <StatCard
                         icon={<Layers size={28} />}
-                        label="Sections"
-                        value={sections.length}
+                        label="Séries"
+                        value={series.length}
                         color="amber"
                     />
                 </div>
@@ -255,8 +273,8 @@ export default function Index({
                                     Filtres rapides
                                 </h2>
                                 <p className="text-sm text-slate-500">
-                                    Affinez la liste par classe, section ou
-                                    série.
+                                    Affinez la liste par classe, série ou
+                                    section.
                                 </p>
                             </div>
                         </div>
@@ -291,27 +309,6 @@ export default function Index({
                         ))}
                     </FilterGroup>
 
-                    <FilterGroup title="Sections">
-                        <FilterButton
-                            active={selectedSection === "all"}
-                            onClick={() => changeSectionFilter("all")}
-                            color="emerald"
-                        >
-                            Toutes sections
-                        </FilterButton>
-
-                        {sections.map((s) => (
-                            <FilterButton
-                                key={s.id}
-                                active={selectedSection == s.id}
-                                onClick={() => changeSectionFilter(s.id)}
-                                color="emerald"
-                            >
-                                {s.name}
-                            </FilterButton>
-                        ))}
-                    </FilterGroup>
-
                     <FilterGroup title="Séries">
                         <FilterButton
                             active={selectedSerie === "all"}
@@ -340,6 +337,27 @@ export default function Index({
                             </FilterButton>
                         ))}
                     </FilterGroup>
+
+                    <FilterGroup title="Sections">
+                        <FilterButton
+                            active={selectedSection === "all"}
+                            onClick={() => changeSectionFilter("all")}
+                            color="emerald"
+                        >
+                            Toutes sections
+                        </FilterButton>
+
+                        {sections.map((s) => (
+                            <FilterButton
+                                key={s.id}
+                                active={selectedSection == s.id}
+                                onClick={() => changeSectionFilter(s.id)}
+                                color="emerald"
+                            >
+                                {s.name}
+                            </FilterButton>
+                        ))}
+                    </FilterGroup>
                 </div>
 
                 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
@@ -348,11 +366,19 @@ export default function Index({
                             <h2 className="text-xl font-black text-slate-800">
                                 Liste des élèves
                             </h2>
-                            <p className="text-sm text-slate-500">
-                                {filteredStudents.length} élève(s) trouvé(s).
-                                Affichage de {firstItemNumber} à{" "}
-                                {lastItemNumber}.
-                            </p>
+
+                            {hasActiveFilter ? (
+                                <p className="text-sm text-slate-500">
+                                    {filteredStudents.length} élève(s)
+                                    trouvé(s). Affichage de {firstItemNumber} à{" "}
+                                    {lastItemNumber}.
+                                </p>
+                            ) : (
+                                <p className="text-sm text-slate-500">
+                                    Choisissez une classe, une série ou une
+                                    section pour afficher les élèves.
+                                </p>
+                            )}
                         </div>
 
                         <div className="rounded-2xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
@@ -365,13 +391,19 @@ export default function Index({
                             <thead className="bg-slate-100">
                                 <tr>
                                     <th className="p-4 text-left text-sm font-bold text-slate-600">
+                                        Classe
+                                    </th>
+                                    <th className="p-4 text-left text-sm font-bold text-slate-600">
                                         Élève
                                     </th>
                                     <th className="p-4 text-left text-sm font-bold text-slate-600">
                                         Email
                                     </th>
                                     <th className="p-4 text-left text-sm font-bold text-slate-600">
-                                        Classe
+                                        Série
+                                    </th>
+                                    <th className="p-4 text-left text-sm font-bold text-slate-600">
+                                        Section
                                     </th>
                                     <th className="p-4 text-left text-sm font-bold text-slate-600">
                                         Matricule
@@ -388,6 +420,12 @@ export default function Index({
                                         key={s.id}
                                         className="border-t border-slate-100 transition hover:bg-slate-50"
                                     >
+                                        <td className="p-4">
+                                            <span className="inline-flex rounded-xl bg-indigo-50 px-3 py-1 text-sm font-black text-indigo-700">
+                                                {s.classe?.name || "-"}
+                                            </span>
+                                        </td>
+
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -410,10 +448,14 @@ export default function Index({
                                         </td>
 
                                         <td className="p-4">
-                                            <span className="inline-flex rounded-xl bg-indigo-50 px-3 py-1 text-sm font-black text-indigo-700">
-                                                {s.classe?.name || "-"}{" "}
-                                                {s.serie?.name || ""}{" "}
-                                                {s.section?.name || ""}
+                                            <span className="inline-flex rounded-xl bg-violet-50 px-3 py-1 text-sm font-black text-violet-700">
+                                                {s.serie?.name || "-"}
+                                            </span>
+                                        </td>
+
+                                        <td className="p-4">
+                                            <span className="inline-flex rounded-xl bg-emerald-50 px-3 py-1 text-sm font-black text-emerald-700">
+                                                {s.section?.name || "-"}
                                             </span>
                                         </td>
 
@@ -451,16 +493,31 @@ export default function Index({
                                     </tr>
                                 ))}
 
-                                {paginatedStudents.length === 0 && (
+                                {!hasActiveFilter && (
                                     <tr>
                                         <td
-                                            colSpan="5"
+                                            colSpan="7"
                                             className="p-10 text-center text-slate-500"
                                         >
-                                            Aucun élève trouvé avec ces filtres.
+                                            Veuillez choisir une classe, une
+                                            série ou une section pour afficher
+                                            les élèves.
                                         </td>
                                     </tr>
                                 )}
+
+                                {hasActiveFilter &&
+                                    paginatedStudents.length === 0 && (
+                                        <tr>
+                                            <td
+                                                colSpan="7"
+                                                className="p-10 text-center text-slate-500"
+                                            >
+                                                Aucun élève trouvé avec ces
+                                                filtres.
+                                            </td>
+                                        </tr>
+                                    )}
                             </tbody>
                         </table>
                     </div>
@@ -574,6 +631,40 @@ export default function Index({
                                             ))}
                                         </select>
 
+                                        {form.classe_id &&
+                                            !isSecondeSelected && (
+                                                <select
+                                                    className={inputClass}
+                                                    value={form.serie_id}
+                                                    onChange={(e) =>
+                                                        setForm({
+                                                            ...form,
+                                                            serie_id:
+                                                                e.target.value,
+                                                        })
+                                                    }
+                                                >
+                                                    <option value="">
+                                                        Série facultative
+                                                    </option>
+                                                    {series.map((s) => (
+                                                        <option
+                                                            key={s.id}
+                                                            value={s.id}
+                                                        >
+                                                            {s.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+
+                                        {isSecondeSelected && (
+                                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                                                La classe Seconde n’a pas de
+                                                série.
+                                            </div>
+                                        )}
+
                                         <select
                                             className={inputClass}
                                             value={form.section_id}
@@ -591,39 +682,6 @@ export default function Index({
                                                 </option>
                                             ))}
                                         </select>
-
-                                        {form.classe_id && !isSecondeSelected && (
-                                            <select
-                                                className={`${inputClass} md:col-span-2`}
-                                                value={form.serie_id}
-                                                onChange={(e) =>
-                                                    setForm({
-                                                        ...form,
-                                                        serie_id:
-                                                            e.target.value,
-                                                    })
-                                                }
-                                            >
-                                                <option value="">
-                                                    Série facultative
-                                                </option>
-                                                {series.map((s) => (
-                                                    <option
-                                                        key={s.id}
-                                                        value={s.id}
-                                                    >
-                                                        {s.name}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        )}
-
-                                        {isSecondeSelected && (
-                                            <div className="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
-                                                La classe Seconde n’a pas de
-                                                série.
-                                            </div>
-                                        )}
                                     </div>
 
                                     <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -800,9 +858,7 @@ function FilterGroup({ title, children }) {
             <p className="mb-2 text-sm font-black uppercase tracking-wide text-slate-500">
                 {title}
             </p>
-            <div className="flex flex-wrap gap-2">
-                {children}
-            </div>
+            <div className="flex flex-wrap gap-2">{children}</div>
         </div>
     );
 }

@@ -19,13 +19,125 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class BulletinController extends Controller
 {
-    public function index(): Response
+
+    private function studentPdfRowsFromArchives($archives, ?string $search = null)
     {
+        $rows = collect();
+
+        foreach ($archives as $archive) {
+            $filters = $archive->filters;
+
+            if (is_string($filters)) {
+                $filters = json_decode($filters, true) ?: [];
+            }
+
+            $studentFiles = $filters['student_files'] ?? [];
+
+            foreach ($studentFiles as $file) {
+                $filePath = $file['file_path'] ?? null;
+
+                if (!$filePath) {
+                    continue;
+                }
+
+                $rows->push([
+                    'archive_id' => $archive->id,
+                    'school_year_id' => $archive->school_year_id,
+                    'school_year' => $archive->schoolYear?->year ?? '-',
+                    'classe' => $archive->classe?->name ?? 'Toutes classes',
+                    'section' => $archive->section?->name,
+                    'serie' => $archive->serie?->name,
+                    'student_id' => $file['student_id'] ?? null,
+                    'student_name' => $file['name'] ?? 'Élève',
+                    'matricule' => $file['matricule'] ?? '-',
+                    'file_path' => $filePath,
+                    'file_name' => $file['name'] ?? basename($filePath),
+                    'generated_at' => optional($archive->generated_at ?? $archive->created_at)->format('d/m/Y H:i'),
+                    'download_url' => route('admin.bulletins.archives.student-pdf.download', [
+                        'path' => base64_encode($filePath),
+                    ]),
+                ]);
+            }
+        }
+
+        if ($search) {
+            $search = Str::lower(Str::ascii($search));
+
+            $rows = $rows->filter(function ($row) use ($search) {
+                $name = Str::lower(Str::ascii($row['student_name'] ?? ''));
+                $matricule = Str::lower(Str::ascii($row['matricule'] ?? ''));
+                $fileName = Str::lower(Str::ascii($row['file_name'] ?? ''));
+
+                return Str::contains($name, $search)
+                    || Str::contains($matricule, $search)
+                    || Str::contains($fileName, $search);
+            });
+        }
+
+        return $rows->values();
+    }
+
+public function index(Request $request): Response
+    {
+        // 1. Récupération des filtres de la requête URL
+        $classeId = $request->input('classe_id');
+        $sectionId = $request->input('section_id');
+        $trimestreId = $request->input('trimestre_id');
+
+        // 2. Construction de la requête pour les bulletins
+        $bulletinsQuery = Bulletin::with([
+            'student.user',
+            'student.classe',
+            'student.section',
+            'student.serie',
+            'trimestre.schoolYear',
+        ]);
+
+        // Filtre Niveau 1 : Classe (appliqué sur la relation student)
+        if (!empty($classeId)) {
+            $bulletinsQuery->whereHas('student', function ($query) use ($classeId) {
+                $query->where('classe_id', $classeId);
+            });
+        }
+
+        // Filtre Niveau 2 : Section (appliqué sur la relation student, uniquement si classe_id est présent)
+        if (!empty($classeId) && !empty($sectionId)) {
+            $bulletinsQuery->whereHas('student', function ($query) use ($sectionId) {
+                $query->where('section_id', $sectionId);
+            });
+        }
+
+        // Filtre Niveau 3 : Trimestre (directement sur la table bulletins)
+        if (!empty($classeId) && !empty($trimestreId)) {
+            $bulletinsQuery->where('trimestre_id', $trimestreId);
+        }
+
+        // Tri par année, trimestre, puis par rang (les rangs NULL vont à la fin)
+        $bulletins = $bulletinsQuery->orderByDesc('school_year_id')
+            ->orderByDesc('trimestre_id')
+            ->orderByRaw('rang IS NULL, rang ASC')
+            ->paginate(20)
+            ->withQueryString(); // Préserve les paramètres de filtres dans les liens de pagination
+
+        // 3. Récupération des archives récentes pour l'affichage des PDF
+        $recentArchives = BulletinArchive::with([
+            'schoolYear',
+            'classe',
+            'section',
+            'serie',
+            'generator',
+        ])
+            ->latest()
+            ->take(20)
+            ->get();
+
+        // 4. Renvoi des données à la vue Inertia
         return Inertia::render('Admin/Bulletins/Index', [
             'classes' => Classe::orderBy('id')->get(),
             'sections' => Section::orderBy('name')->get(),
@@ -37,34 +149,20 @@ class BulletinController extends Controller
                 ->orderBy('start_date')
                 ->get(),
 
-            /*
-            |--------------------------------------------------------------------------
-            | Tri demandé : les bulletins sont affichés par rang.
-            |--------------------------------------------------------------------------
-            */
-            'bulletins' => Bulletin::with([
-                'student.user',
-                'student.classe',
-                'student.section',
-                'student.serie',
-                'trimestre.schoolYear',
-            ])
-                ->orderByDesc('school_year_id')
-                ->orderByDesc('trimestre_id')
-                ->orderByRaw('rang IS NULL, rang ASC')
-                ->paginate(20)
-                ->withQueryString(),
+            'bulletins' => $bulletins,
 
-            'archives' => BulletinArchive::with([
-                'schoolYear',
-                'classe',
-                'section',
-                'serie',
-                'generator',
-            ])
-                ->latest()
-                ->take(10)
-                ->get(),
+            // Retourne l'état actuel des filtres au composant React
+            'filters' => [
+                'classe_id' => $classeId,
+                'section_id' => $sectionId,
+                'trimestre_id' => $trimestreId,
+            ],
+
+            'recentStudentPdfs' => $this->studentPdfRowsFromArchives($recentArchives)
+                ->take(5)
+                ->values(),
+
+            'archives' => $recentArchives->take(5)->values(),
         ]);
     }
 
@@ -99,14 +197,6 @@ class BulletinController extends Controller
 
         $studentIds = $students->pluck('id');
 
-        /*
-        |--------------------------------------------------------------------------
-        | Notes du trimestre
-        |--------------------------------------------------------------------------
-        | Si le trimestre contient 2 évaluations, les 2 notes sont récupérées.
-        | Ensuite on calcule la moyenne par matière.
-        |--------------------------------------------------------------------------
-        */
         $notesByStudent = NoteDetail::with([
             'evaluation',
             'teacherSubject.subject',
@@ -136,16 +226,6 @@ class BulletinController extends Controller
                     continue;
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | Moyenne par matière
-                |--------------------------------------------------------------------------
-                | Exemple :
-                | Math évaluation 1 = 12
-                | Math évaluation 2 = 14
-                | Moyenne Math = 13
-                |--------------------------------------------------------------------------
-                */
                 $notesBySubject = $studentNotes
                     ->filter(function ($note) {
                         return $note->teacherSubject && $note->teacherSubject->subject;
@@ -167,11 +247,6 @@ class BulletinController extends Controller
                     $firstNote = $subjectNotes->first();
                     $subject = $firstNote->teacherSubject->subject;
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | Moyenne de toutes les évaluations du trimestre pour cette matière.
-                    |--------------------------------------------------------------------------
-                    */
                     $average = round($subjectNotes->avg('note'), 2);
 
                     $coefficient = (int) (
@@ -238,22 +313,6 @@ class BulletinController extends Controller
         );
     }
 
-    // public function show(Bulletin $bulletin): Response
-    // {
-    //     $bulletin->load([
-    //         'student.user',
-    //         'student.classe',
-    //         'student.section',
-    //         'student.serie',
-    //         'trimestre.schoolYear',
-    //         'details.subject',
-    //     ]);
-
-    //     return Inertia::render('Admin/Bulletins/Show', [
-    //         'bulletin' => $bulletin,
-    //     ]);
-    // }
-
     public function show(Bulletin $bulletin): Response
     {
         $bulletin->load([
@@ -270,23 +329,8 @@ class BulletinController extends Controller
 
         $schoolYear = SchoolYear::find($schoolYearId);
 
-        /*
-        |--------------------------------------------------------------------------
-        | On récupère toujours les 3 trimestres de l'année scolaire
-        |--------------------------------------------------------------------------
-        */
-        $annualTrimestres = Trimestre::where('school_year_id', $schoolYearId)
-            ->orderBy('start_date')
-            ->orderBy('id')
-            ->take(3)
-            ->get()
-            ->values();
+        $annualTrimestres = $this->getAnnualTrimestres((int) $schoolYearId);
 
-        /*
-        |--------------------------------------------------------------------------
-        | On récupère tous les bulletins déjà générés pour cet élève dans l'année
-        |--------------------------------------------------------------------------
-        */
         $annualBulletins = Bulletin::with([
             'trimestre.schoolYear',
             'details.subject',
@@ -298,11 +342,6 @@ class BulletinController extends Controller
             ->get()
             ->values();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Moyenne annuelle de l'élève
-        |--------------------------------------------------------------------------
-        */
         $validAverages = $annualBulletins
             ->pluck('moyenne')
             ->filter(fn ($value) => $value !== null)
@@ -313,11 +352,6 @@ class BulletinController extends Controller
             ? round($validAverages->avg(), 2)
             : null;
 
-        /*
-        |--------------------------------------------------------------------------
-        | Rang annuel dans la même classe / section / série
-        |--------------------------------------------------------------------------
-        */
         $classStudentIds = Student::where('classe_id', $student->classe_id)
             ->where('section_id', $student->section_id)
             ->when(
@@ -375,83 +409,134 @@ class BulletinController extends Controller
     {
         $validated = $request->validate([
             'school_year_id' => ['required', 'exists:school_years,id'],
-            'classe_id' => ['required', 'exists:classes,id'],
+            'classe_id' => ['nullable', 'exists:classes,id'],
             'section_id' => ['nullable', 'exists:sections,id'],
             'serie_id' => ['nullable', 'exists:series,id'],
         ]);
 
         $schoolYear = SchoolYear::findOrFail($validated['school_year_id']);
-        $classe = Classe::findOrFail($validated['classe_id']);
+
+        $classe = !empty($validated['classe_id'])
+            ? Classe::findOrFail($validated['classe_id'])
+            : null;
+
         $section = !empty($validated['section_id'])
             ? Section::find($validated['section_id'])
             : null;
+
         $serie = !empty($validated['serie_id'])
             ? Serie::find($validated['serie_id'])
             : null;
 
-        $trimestres = Trimestre::where('school_year_id', $schoolYear->id)
-            ->orderBy('start_date')
-            ->get();
+        $trimestres = $this->getAnnualTrimestres((int) $schoolYear->id);
+
+        if ($trimestres->isEmpty()) {
+            abort(404, "Aucun trimestre trouvé pour cette année scolaire.");
+        }
 
         $students = Student::with(['user', 'classe', 'section', 'serie'])
-            ->where('classe_id', $classe->id)
+            ->when($classe, function ($query) use ($classe) {
+                $query->where('classe_id', $classe->id);
+            })
             ->when($section, function ($query) use ($section) {
                 $query->where('section_id', $section->id);
             })
             ->when($serie, function ($query) use ($serie) {
                 $query->where('serie_id', $serie->id);
             })
+            ->orderBy('classe_id')
             ->orderBy('section_id')
             ->orderBy('serie_id')
             ->orderBy('matricule')
             ->get();
 
-        $bulletins = Bulletin::with(['trimestre'])
+        if ($students->isEmpty()) {
+            abort(404, "Aucun élève trouvé avec ces filtres.");
+        }
+
+        $allBulletins = Bulletin::with([
+            'trimestre.schoolYear',
+            'details.subject',
+        ])
             ->whereIn('student_id', $students->pluck('id'))
             ->where('school_year_id', $schoolYear->id)
+            ->whereIn('trimestre_id', $trimestres->pluck('id'))
             ->get()
             ->groupBy('student_id');
 
-        $rows = $students->map(function ($student) use ($trimestres, $bulletins) {
-            $studentBulletins = $bulletins->get($student->id, collect());
-
-            $trimesterResults = [];
-            $validAverages = [];
-
-            foreach ($trimestres as $trimestre) {
-                $bulletin = $studentBulletins
-                    ->firstWhere('trimestre_id', $trimestre->id);
-
-                $moyenne = $bulletin?->moyenne;
-
-                $trimesterResults[] = [
-                    'trimestre_id' => $trimestre->id,
-                    'trimestre_name' => $trimestre->name ?? $trimestre->title ?? 'Trimestre',
-                    'moyenne' => $moyenne,
-                    'rang' => $bulletin?->rang,
-                ];
-
-                if ($moyenne !== null) {
-                    $validAverages[] = (float) $moyenne;
-                }
-            }
-
-            $annualAverage = count($validAverages) > 0
-                ? round(array_sum($validAverages) / count($validAverages), 2)
-                : null;
-
-            return [
-                'student' => $student,
-                'trimestres' => $trimesterResults,
-                'annual_average' => $annualAverage,
-                'annual_rank' => null,
-                'completed_trimestres' => count($validAverages),
-            ];
+        $studentDataList = $students->map(function ($student) use (
+            $schoolYear,
+            $trimestres,
+            $allBulletins
+        ) {
+            return $this->buildAnnualStudentBulletinData(
+                $student,
+                $schoolYear,
+                $trimestres,
+                $allBulletins->get($student->id, collect())
+            );
         });
 
-        $rankedRows = $this->rankAnnualRows($rows);
+        $rankedRows = $this->rankAnnualRows(
+            $studentDataList->map(function ($data) {
+                return [
+                    'student' => $data['student'],
+                    'trimestres' => $data['trimesterResults'],
+                    'annual_average' => $data['annualAverage'],
+                    'annual_rank' => null,
+                    'completed_trimestres' => $data['completedTrimestres'],
+                ];
+            })
+        );
 
-        $pdf = Pdf::loadView('pdfs.bulletins.annual_archive', [
+        $rankByStudent = $rankedRows->keyBy(function ($row) {
+            return $row['student']->id;
+        });
+
+        $yearFolder = $this->cleanFileName(
+            $schoolYear->year ?? 'annee_' . $schoolYear->id
+        );
+
+        $savedFiles = [];
+
+        foreach ($studentDataList as $data) {
+            $student = $data['student'];
+            $rankRow = $rankByStudent->get($student->id);
+
+            $data['annualRank'] = $rankRow['annual_rank'] ?? null;
+
+            $studentFolderName = $this->cleanFileName(
+                ($student->matricule ?: 'eleve_' . $student->id) .
+                '_' .
+                ($student->user?->name ?? 'sans_nom')
+            );
+
+            $studentFolder = "archives/bulletins/{$yearFolder}/eleves/{$studentFolderName}";
+
+            $fileName = 'bulletin_annuel_' .
+                $this->cleanFileName($student->matricule ?: 'eleve_' . $student->id) .
+                '_' .
+                now()->format('Ymd_His') .
+                '.pdf';
+
+            $filePath = "{$studentFolder}/{$fileName}";
+
+            $pdf = Pdf::loadView('pdfs.bulletins.student_annual', $data)
+                ->setPaper('a4', 'landscape');
+
+            Storage::disk('public')->makeDirectory($studentFolder);
+            Storage::disk('public')->put($filePath, $pdf->output());
+
+            $savedFiles[] = [
+                'student_id' => $student->id,
+                'matricule' => $student->matricule,
+                'name' => $student->user?->name,
+                'file_path' => $filePath,
+                'url' => Storage::url($filePath),
+            ];
+        }
+
+        $summaryPdf = Pdf::loadView('pdfs.bulletins.annual_archive', [
             'schoolYear' => $schoolYear,
             'classe' => $classe,
             'section' => $section,
@@ -459,30 +544,41 @@ class BulletinController extends Controller
             'trimestres' => $trimestres,
             'rows' => $rankedRows,
             'generatedAt' => now(),
+            'savedFiles' => $savedFiles,
         ])->setPaper('a4', 'landscape');
 
-        $fileName = 'archive_bulletins_' .
-            $schoolYear->id . '_' .
-            $classe->id . '_' .
+        $scopeName = $classe
+            ? $this->cleanFileName($classe->name)
+            : 'toutes_classes';
+
+        $summaryFileName = 'resume_generation_bulletins_' .
+            $yearFolder .
+            '_' .
+            $scopeName .
+            '_' .
             now()->format('Ymd_His') .
             '.pdf';
 
-        $filePath = 'archives/bulletins/' . $fileName;
+        $summaryFolder = "archives/bulletins/{$yearFolder}/resumes";
+        $summaryPath = "{$summaryFolder}/{$summaryFileName}";
 
-        Storage::disk('public')->put($filePath, $pdf->output());
+        Storage::disk('public')->makeDirectory($summaryFolder);
+        Storage::disk('public')->put($summaryPath, $summaryPdf->output());
 
         BulletinArchive::create([
             'school_year_id' => $schoolYear->id,
-            'classe_id' => $classe->id,
+            'classe_id' => $classe?->id,
             'section_id' => $section?->id,
             'serie_id' => $serie?->id,
-            'file_path' => $filePath,
-            'filters' => $validated,
+            'file_path' => $summaryPath,
+            'filters' => array_merge($validated, [
+                'student_files' => $savedFiles,
+            ]),
             'generated_by' => Auth::id(),
             'generated_at' => now(),
         ]);
 
-        return $pdf->download($fileName);
+        return $summaryPdf->download($summaryFileName);
     }
 
     public function downloadArchive(BulletinArchive $archive)
@@ -509,7 +605,10 @@ class BulletinController extends Controller
         $previousRank = 1;
 
         foreach ($bulletins as $index => $bulletin) {
-            if ($previousMoyenne !== null && (float) $bulletin->moyenne === (float) $previousMoyenne) {
+            if (
+                $previousMoyenne !== null &&
+                (float) $bulletin->moyenne === (float) $previousMoyenne
+            ) {
                 $currentRank = $previousRank;
             } else {
                 $currentRank = $rank;
@@ -536,8 +635,15 @@ class BulletinController extends Controller
         $previousAverage = null;
         $previousRank = 1;
 
-        $ranked = $rankable->map(function ($row, $index) use (&$rank, &$previousAverage, &$previousRank) {
-            if ($previousAverage !== null && (float) $row['annual_average'] === (float) $previousAverage) {
+        $ranked = $rankable->map(function ($row, $index) use (
+            &$rank,
+            &$previousAverage,
+            &$previousRank
+        ) {
+            if (
+                $previousAverage !== null &&
+                (float) $row['annual_average'] === (float) $previousAverage
+            ) {
                 $currentRank = $previousRank;
             } else {
                 $currentRank = $rank;
@@ -556,10 +662,211 @@ class BulletinController extends Controller
             ->filter(fn ($row) => $row['annual_average'] === null)
             ->map(function ($row) {
                 $row['annual_rank'] = null;
+
                 return $row;
             });
 
         return $ranked->merge($withoutAverage)->values();
+    }
+
+    private function getAnnualTrimestres(int $schoolYearId)
+    {
+        return Trimestre::where('school_year_id', $schoolYearId)
+            ->get()
+            ->sortBy(function ($trimestre) {
+                return $this->trimestrePosition($trimestre);
+            })
+            ->values()
+            ->take(3);
+    }
+
+    private function trimestrePosition($trimestre): int
+    {
+        $name = Str::lower(
+            Str::ascii($trimestre->name ?? $trimestre->title ?? '')
+        );
+
+        if (
+            Str::contains($name, [
+                '1er',
+                '1ere',
+                '1e',
+                '1eme',
+                'premier',
+                'premiere',
+                'trimestre 1',
+            ])
+        ) {
+            return 1;
+        }
+
+        if (
+            Str::contains($name, [
+                '2e',
+                '2eme',
+                'deuxieme',
+                'second',
+                'seconde',
+                'trimestre 2',
+            ])
+        ) {
+            return 2;
+        }
+
+        if (
+            Str::contains($name, [
+                '3e',
+                '3eme',
+                'troisieme',
+                'trimestre 3',
+            ])
+        ) {
+            return 3;
+        }
+
+        return 10 + (int) $trimestre->id;
+    }
+
+    private function buildAnnualStudentBulletinData(
+        Student $student,
+        SchoolYear $schoolYear,
+        $trimestres,
+        $studentBulletins
+    ): array {
+        $bulletinsByTrimestre = $studentBulletins->keyBy('trimestre_id');
+
+        $allDetails = $studentBulletins->flatMap(function ($bulletin) {
+            return $bulletin->details;
+        });
+
+        $subjectIds = $allDetails
+            ->pluck('subject_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $subjectRows = $subjectIds
+            ->map(function ($subjectId) use (
+                $trimestres,
+                $bulletinsByTrimestre,
+                $allDetails
+            ) {
+                $firstDetail = $allDetails->first(function ($detail) use ($subjectId) {
+                    return (int) $detail->subject_id === (int) $subjectId;
+                });
+
+                $subject = $firstDetail?->subject;
+
+                $coefficient = (int) (
+                    $firstDetail?->coefficient
+                    ?: $subject?->coefficient
+                    ?: 1
+                );
+
+                $trimesterCells = [];
+                $validAverages = [];
+
+                foreach ($trimestres as $trimestre) {
+                    $bulletin = $bulletinsByTrimestre->get($trimestre->id);
+
+                    $detail = $bulletin?->details->first(function ($item) use ($subjectId) {
+                        return (int) $item->subject_id === (int) $subjectId;
+                    });
+
+                    $average = $detail?->average;
+
+                    $trimesterCells[] = [
+                        'trimestre_id' => $trimestre->id,
+                        'average' => $average,
+                        'appreciation' => $detail?->appreciation,
+                    ];
+
+                    if ($average !== null) {
+                        $validAverages[] = (float) $average;
+                    }
+                }
+
+                $annualSubjectAverage = count($validAverages) > 0
+                    ? round(array_sum($validAverages) / count($validAverages), 2)
+                    : null;
+
+                $weightedAnnual = $annualSubjectAverage !== null
+                    ? round($annualSubjectAverage * $coefficient, 2)
+                    : null;
+
+                return [
+                    'subject_id' => $subjectId,
+                    'subject_name' => $subject?->name ?? '-',
+                    'coefficient' => $coefficient,
+                    'trimestres' => $trimesterCells,
+                    'annual_average' => $annualSubjectAverage,
+                    'weighted_annual' => $weightedAnnual,
+                    'appreciation' => $annualSubjectAverage !== null
+                        ? $this->getAppreciation((float) $annualSubjectAverage)
+                        : '-',
+                ];
+            })
+            ->sortBy('subject_name')
+            ->values();
+
+        $validSubjectRows = $subjectRows->filter(function ($row) {
+            return $row['annual_average'] !== null;
+        });
+
+        $totalCoefficient = $validSubjectRows->sum('coefficient');
+
+        $totalWeighted = $validSubjectRows->sum(function ($row) {
+            return (float) ($row['weighted_annual'] ?? 0);
+        });
+
+        $annualAverage = $totalCoefficient > 0
+            ? round($totalWeighted / $totalCoefficient, 2)
+            : null;
+
+        $trimesterResults = $trimestres
+            ->map(function ($trimestre) use ($bulletinsByTrimestre) {
+                $bulletin = $bulletinsByTrimestre->get($trimestre->id);
+
+                return [
+                    'trimestre_id' => $trimestre->id,
+                    'trimestre_name' => $trimestre->name ?? $trimestre->title ?? 'Trimestre',
+                    'moyenne' => $bulletin?->moyenne,
+                    'rang' => $bulletin?->rang,
+                ];
+            })
+            ->values();
+
+        $completedTrimestres = $trimesterResults
+            ->filter(function ($row) {
+                return $row['moyenne'] !== null;
+            })
+            ->count();
+
+        return [
+            'student' => $student,
+            'schoolYear' => $schoolYear,
+            'trimestres' => $trimestres,
+            'subjectRows' => $subjectRows,
+            'trimesterResults' => $trimesterResults,
+            'annualAverage' => $annualAverage,
+            'annualRank' => null,
+            'totalCoefficient' => $totalCoefficient,
+            'totalWeighted' => $totalWeighted,
+            'completedTrimestres' => $completedTrimestres,
+            'generatedAt' => now(),
+        ];
+    }
+
+    private function cleanFileName(?string $value): string
+    {
+        $clean = Str::of($value ?: 'sans_nom')
+            ->ascii()
+            ->lower()
+            ->replaceMatches('/[^a-z0-9\-_]+/', '_')
+            ->trim('_')
+            ->toString();
+
+        return $clean ?: 'sans_nom';
     }
 
     private function getAppreciation(float $average): string
@@ -582,4 +889,54 @@ class BulletinController extends Controller
 
         return 'Insuffisant';
     }
+
+    public function archivesIndex(Request $request): Response
+{
+    $schoolYearId = $request->input('school_year_id');
+    $search = trim((string) $request->input('search'));
+
+    $archives = BulletinArchive::with([
+        'schoolYear',
+        'classe',
+        'section',
+        'serie',
+        'generator',
+    ])
+        ->when($schoolYearId, function ($query) use ($schoolYearId) {
+            $query->where('school_year_id', $schoolYearId);
+        })
+        ->latest()
+        ->get();
+
+    $studentPdfs = $this->studentPdfRowsFromArchives($archives, $search);
+
+    return Inertia::render('Admin/Bulletins/Archives', [
+        'schoolYears' => SchoolYear::orderByDesc('id')->get(),
+        'studentPdfs' => $studentPdfs,
+        'filters' => [
+            'school_year_id' => $schoolYearId,
+            'search' => $search,
+        ],
+    ]);
+}
+
+public function downloadStudentPdf(Request $request)
+{
+    $encodedPath = $request->query('path');
+
+    abort_unless($encodedPath, 404);
+
+    $filePath = base64_decode($encodedPath, true);
+
+    abort_unless($filePath, 404);
+
+    abort_unless(
+        Str::startsWith($filePath, 'archives/bulletins/'),
+        403
+    );
+
+    abort_unless(Storage::disk('public')->exists($filePath), 404);
+
+    return response()->download(storage_path('app/public/' . $filePath));
+}
 }
